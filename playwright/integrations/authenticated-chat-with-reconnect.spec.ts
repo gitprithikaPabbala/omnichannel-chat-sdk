@@ -481,10 +481,10 @@ test.describe('AuthenticatedChat @AuthenticatedChatWithChatReconnect', () => {
                 const payload = {
                     method: "POST"
                 };
-
+                
                 const response = await fetch(authUrl, payload);
                 const authToken = await response.text();
-
+                await sleep(chatDuration);
                 const chatSDKConfig = {
                     getAuthToken: () => authToken,
                     chatReconnect: {
