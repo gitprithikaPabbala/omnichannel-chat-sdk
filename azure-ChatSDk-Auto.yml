@@ -1,0 +1,103 @@
+trigger:
+- none
+
+variables:
+- { name: WindowsContainerImage, value: "onebranch.azurecr.io/windows/ltsc2022/vse2022:latest"} # Docker image which is used to build the project https://aka.ms/obpipelines/containers
+- group: Automation data for Play Wright LCWV2 E2E PPE - cscftest-ppeorg01
+
+resources:
+  repositories: 
+    - repository: templates
+      type: git
+      name: OneBranch.Pipelines/GovernedTemplates
+      ref: refs/heads/main
+    - repository: omnichannel-chat-sdk # The name used to reference this repository in the checkout step
+      type: github
+      endpoint: gitprithikaPabbala/omnichannel-chat-sdk
+      name: microsoft/omnichannel-chat-sdk
+    - repository: ServiceIntegration
+      type: git
+      name: OneCRM/CRM.Omnichannel.ServiceIntegration
+      ref: users/v-pprithika/Downloadpowershell
+
+extends:
+  template: v2/OneBranch.NonOfficial.CrossPlat.yml@templates
+  parameters:
+    featureFlags:
+      WindowsHostVersion:
+          Version: 2022
+          Network: KS4
+    stages:
+    - stage: ChatSDk_stage
+      displayName: 'ChatSDk_stage'
+      jobs:
+      - job: 'sdkCases'
+        displayName: 'sdkCases'
+        timeoutInMinutes: 540
+        variables:
+          ob_outputDirectory: '$(Build.SourcesDirectory)\out'
+        pool:
+          type: windows
+          
+        steps:
+        - checkout: ServiceIntegration
+        - template: templates/test.config.sample.yml@self
+        - task: AzureCLI@2
+          inputs:
+            azureSubscription: 'oc-anelcw-federated'
+            scriptType: 'ps'
+            scriptLocation: 'inlineScript'
+            inlineScript: |
+                az login --service-principal -u $(ServicePrincipalId) -p $(ServicePrincipalKey) --tenant $(TenantId)
+                az account set --subscription $(subscription)
+
+                echo "Current Directory: $(System.DefaultWorkingDirectory)"
+                # Change to the working directory
+                Set-Location -Path "$(System.DefaultWorkingDirectory)/_gitprithikaPabbala_omnichannel-chat-sdk/playwright"
+
+                # Run Playwright tests
+                 npm run test:integrations
+          displayName: 'Run Tests'
+          continueOnError: true
+          env:
+            subscription: $(subscription)
+            AuthToken: $(AuthToken)
+            ApplicationClientSecret: $(ApplicationClientSecret)
+            Client_Secret: $(Client_Secret)
+            ServicePrincipalKey: $(ServicePrincipalKey)
+            ServicePrincipalId: $(ServicePrincipalId)
+            TenantId: $(TenantId)
+        - task: CopyFiles@2
+          displayName: 'Copy screenshots to staging'
+          inputs:
+            SourceFolder: '$(System.DefaultWorkingDirectory)/_gitprithikaPabbala_omnichannel-chat-sdk/playwright'
+            Contents: '**/test-results/**/*.png'
+            TargetFolder: '$(ob_outputDirectory)/e2eReports'
+            continueOnError: true
+            condition: succeededOrFailed()
+        - task: CopyFiles@2
+          displayName: 'Copy trace to staging'
+          inputs:
+            SourceFolder: '$(System.DefaultWorkingDirectory)/_gitprithikaPabbala_omnichannel-chat-sdk/playwright'
+            Contents: '**/test-results/**/*.zip'
+            TargetFolder: '$(ob_outputDirectory)/e2eReports'
+            continueOnError: true
+            condition: succeededOrFailed()
+        - task: CopyFiles@2
+          displayName: 'Copy test results to staging'
+          inputs:
+            SourceFolder: '$(System.DefaultWorkingDirectory)/_gitprithikaPabbala_omnichannel-chat-sdk/playwright'
+            Contents: '**/reports/junit.xml'
+            TargetFolder: '$(ob_outputDirectory)/e2eReports'
+          continueOnError: true
+          condition: succeededOrFailed()
+
+        - task: PublishTestResults@2
+          displayName: 'Publish Test Results'
+          inputs:
+            testResultsFiles: '$(ob_outputDirectory)/e2eReports/reports/junit.xml'
+            testRunTitle: 'Playwright e2e tests-$(SYSTEM.JOBID)'
+            publishRunAttachments: true
+            mergeTestResults: true
+          continueOnError: true
+          condition: succeededOrFailed()
